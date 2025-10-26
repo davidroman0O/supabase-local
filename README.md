@@ -96,6 +96,9 @@ Tear down everything including volumes (irreversible):
 - To use a different Supabase bundle tag: `SUPABASE_VERSION=v2.9.1 ./supabase-local/start.sh`
 - Migration replays are idempotent. The script checks for `archon_settings` and skips reapplying if the schema already exists.
 - Docker pull/up phases time out after 420 seconds by default. Override via `SUPABASE_PULL_TIMEOUT_SECONDS` and `SUPABASE_UP_TIMEOUT_SECONDS` environment variables if needed.
+- `./supabase-local/apply_env.sh` now auto-detects the best Supabase host. On Linux, if `host.docker.internal` is unreachable it falls back to the in-cluster hostname `supabase-kong.localhost`.
+- When the fallback is used, the Supabase gateway must share the Archon Docker network. By default the scripts expect the network `archon_app-network`; override with `SUPABASE_SHARED_NETWORK=<network name>`.
+- After both stacks are running (particularly on Linux), run `./supabase-local/bridge_networks.sh` to attach `supabase-kong` to the shared network with the alias `supabase-kong.localhost`.
 
 ## Backup & Restore
 

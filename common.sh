@@ -11,6 +11,8 @@ ENV_FILE="$SCRIPT_DIR/.env"
 GENERATED_ENV_DIR="$SCRIPT_DIR/generated-env"
 GENERATED_ENV_FILE="$GENERATED_ENV_DIR/archon.env"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-archon_supabase_local}"
+SHARED_NETWORK="${SUPABASE_SHARED_NETWORK:-archon_app-network}"
+SUPABASE_BRIDGE_ALIAS="${SUPABASE_BRIDGE_ALIAS:-supabase-kong.localhost}"
 SUPABASE_VERSION="${SUPABASE_VERSION:-master}"
 PULL_TIMEOUT_SECONDS="${SUPABASE_PULL_TIMEOUT_SECONDS:-420}"
 UP_TIMEOUT_SECONDS="${SUPABASE_UP_TIMEOUT_SECONDS:-420}"
@@ -175,6 +177,83 @@ SUPABASE_URL=http://127.0.0.1:${port}
 SUPABASE_ANON_KEY=${anon}
 SUPABASE_SERVICE_KEY=${service}
 EOF
+}
+
+connect_shared_network() {
+  local container="$1"
+  shift
+  local network="$SHARED_NETWORK"
+  local aliases=("$@")
+
+  if [[ -z "$network" ]]; then
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    return
+  fi
+  if ! docker network inspect "$network" >/dev/null 2>&1; then
+    return
+  fi
+
+  local inspect_output=""
+  inspect_output="$(docker inspect "$container" --format '{{json .NetworkSettings.Networks}}' 2>/dev/null || true)"
+  if [[ -z "$inspect_output" ]]; then
+    return
+  fi
+
+  local connected=false
+  if NETWORK_INFO="$inspect_output" python3 - "$network" <<'PY'
+import json, os, sys
+
+networks = json.loads(os.environ["NETWORK_INFO"])
+target = sys.argv[1]
+sys.exit(0 if target in networks else 1)
+PY
+  then
+    connected=true
+  fi
+
+  if [[ "$connected" == true && ${#aliases[@]} -gt 0 ]]; then
+    if NETWORK_INFO="$inspect_output" python3 - "$network" "${aliases[@]}" <<'PY'
+import json, os, sys
+
+networks = json.loads(os.environ["NETWORK_INFO"])
+target = sys.argv[1]
+aliases = [alias for alias in sys.argv[2:] if alias]
+info = networks.get(target) or {}
+existing = set(info.get("Aliases") or [])
+missing = [alias for alias in aliases if alias not in existing]
+sys.exit(0 if not missing else 1)
+PY
+    then
+      return
+    fi
+
+    docker network disconnect "$network" "$container" >/dev/null 2>&1 || return
+    connected=false
+  fi
+
+  if [[ "$connected" == true ]]; then
+    return
+  fi
+
+  local args=()
+  for alias in "${aliases[@]}"; do
+    if [[ -n "$alias" ]]; then
+      args+=(--alias "$alias")
+    fi
+  done
+
+  if docker network connect "${args[@]}" "$network" "$container" >/dev/null 2>&1; then
+    if [[ ${#args[@]} -gt 0 ]]; then
+      echo "Attached $container to $network with aliases ${aliases[*]}"
+    else
+      echo "Attached $container to $network"
+    fi
+  fi
 }
 
 wait_for_postgres() {

@@ -70,6 +70,8 @@ write_generated_env
 KONG_HTTP_PORT="$(read_env_var "KONG_HTTP_PORT")"
 KONG_HTTP_PORT="${KONG_HTTP_PORT:-8000}"
 
+connect_shared_network "supabase-kong" "$SUPABASE_BRIDGE_ALIAS"
+
 cat <<EOF
 
 Supabase services are running.
